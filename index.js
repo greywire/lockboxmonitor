@@ -24,34 +24,36 @@ const motor = new Gpio(10, {mode: Gpio.OUTPUT});
 const motor2 = new Gpio(9, {mode: Gpio.OUTPUT});
 
 //** 4 limit switches */
-const limit1 = new Gpio(6, {mode: Gpio.INPUT});
-const limit2 = new Gpio(13, {mode: Gpio.INPUT});
-const limit3 = new Gpio(19, {mode: Gpio.INPUT});
-const limit4 = new Gpio(26, {mode: Gpio.INPUT});
+const limit = [
+  new Gpio(6, {mode: Gpio.INPUT}),
+  new Gpio(13, {mode: Gpio.INPUT}),
+  new Gpio(19, {mode: Gpio.INPUT}),
+  new Gpio(26, {mode: Gpio.INPUT})
+];
 
 //** set the internal pull ups so the switch inputs will have a default */
-limit1.pullUpDown(Gpio.PUD_UP);
-limit2.pullUpDown(Gpio.PUD_UP);
-limit3.pullUpDown(Gpio.PUD_UP);
-limit4.pullUpDown(Gpio.PUD_UP);
+limit[0].pullUpDown(Gpio.PUD_UP);
+limit[1].pullUpDown(Gpio.PUD_UP);
+limit[2].pullUpDown(Gpio.PUD_UP);
+limit[3].pullUpDown(Gpio.PUD_UP);
 
-//** store the current status of each locker */
+//** store the current status of each locker. Defaults to all unlocked and doors open */
 let status = [
   {
-    locked: true,
-    opened: false
+    locked: false,
+    opened: true
   },
   {
-    locked: true,
-    opened: false
+    locked: false,
+    opened: true
   },
   {
-    locked: true,
-    opened: false
+    locked: false,
+    opened: true
   },
   {
-    locked: true,
-    opened: false
+    locked: false,
+    opened: true
   },
 ];
 
@@ -76,53 +78,46 @@ pubnub.addListener({
   }
 });
 
-function setLocker(locker, locked) {
+function setLocker(locker, locking) {
   switch (locker) {
     case 1:
-      motor.servoWrite((locked) ? 2500: 500);
+        motor.servoWrite((locking) ? 2500: 1000);
       break;
     case 2:
-      motor.servoWrite((locked) ? 2500: 500);
+      motor.servoWrite((locking) ? 1000: 500);
       break;
     case 3:
-      motor2.servoWrite((locked) ? 2500: 500);
+      motor2.servoWrite((locking) ? 2500: 1000);
       break;
     case 4:
-      motor2.servoWrite((locked) ? 2500: 500);
+      motor2.servoWrite((locking) ? 500: 500);
       break;
   }
 
 
 }
 
-//** start locked */
-motor.servoWrite(1500);
-motor2.servoWrite(1500);
+//** start with the assumption that some or all doors are open */
+motor.servoWrite(2500);
+motor2.servoWrite(2500);
 
 
 setInterval(() => {
   let sendupdate = false;
 
-  if (!limit1.digitalRead()) {
-    if (status[3])
-    sendupdate = true;
-    console.log("pushed");
-  }
-
-  if (!limit2.digitalRead()) {
-    if (status[3])
-    sendupdate = true;
-    console.log("pushed");
-  }
-  if (!limit3.digitalRead()) {
-    if (status[3])
-    sendupdate = true;
-    console.log("pushed");
-  }
-  if (!limit4.digitalRead()) {
-    if (status[3])
-    sendupdate = true;
-    console.log("pushed");
+  for(l=0;l<4;l++) {
+    if (!limit[l].digitalRead()) { //** currently closed? */
+      if (status[l].opened) { //** but it was open before.. */
+        setLocker(l, true); //** then lock it */
+        status[l].opened = false; //** and flag it closed */
+        sendupdate = true;
+      }
+    } else { //** currently open */
+      if (!status[l].opened) { //** but it was closed before.. */
+        status[l].opened = true; //** then flag it opened */
+        sendupdate = true;
+      }
+    }
   }
 
   if (sendupdate) {
