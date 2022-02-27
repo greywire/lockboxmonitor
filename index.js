@@ -25,17 +25,15 @@ const motor2 = new Gpio(9, {mode: Gpio.OUTPUT});
 
 //** 4 limit switches */
 const limit = [
-  new Gpio(6, {mode: Gpio.INPUT}),
-  new Gpio(13, {mode: Gpio.INPUT}),
-  new Gpio(19, {mode: Gpio.INPUT}),
-  new Gpio(26, {mode: Gpio.INPUT})
+  new Gpio(26, {mode: Gpio.INPUT, pullUpDown: Gpio.PUD_UP,
+    alert: true}),
+  new Gpio(13, {mode: Gpio.INPUT, pullUpDown: Gpio.PUD_UP,
+    alert: true}),
+  new Gpio(19, {mode: Gpio.INPUT, pullUpDown: Gpio.PUD_UP,
+    alert: true}),
+  new Gpio(6, {mode: Gpio.INPUT, pullUpDown: Gpio.PUD_UP,
+    alert: true})
 ];
-
-//** set the internal pull ups so the switch inputs will have a default */
-limit[0].pullUpDown(Gpio.PUD_UP);
-limit[1].pullUpDown(Gpio.PUD_UP);
-limit[2].pullUpDown(Gpio.PUD_UP);
-limit[3].pullUpDown(Gpio.PUD_UP);
 
 //** store the current status of each locker. Defaults to all unlocked and doors open */
 let status = [
@@ -81,55 +79,86 @@ pubnub.addListener({
 function setLocker(locker, locking) {
   switch (locker) {
     case 1:
-        motor.servoWrite((locking) ? 2500: 1000);
+      if (!status[0].opened) 
+      motor.servoWrite((locking) ? 1000:2500);
       break;
     case 2:
+      if (!status[1].opened) 
       motor.servoWrite((locking) ? 1000: 500);
       break;
     case 3:
-      motor2.servoWrite((locking) ? 2500: 1000);
+      if (!status[2].opened) 
+      motor2.servoWrite((locking) ? 1000:2500);
       break;
     case 4:
-      motor2.servoWrite((locking) ? 500: 500);
+      if (!status[3].opened) 
+      motor2.servoWrite((locking) ? 1000: 500);
       break;
   }
 
+  status[locker-1].locked = locking;
 
+  sendstatus();
+
+  servosOff();
+}
+
+function servosOff() {
+  setTimeout(() => {
+    console.log("turn off servos");
+    motor.servoWrite(0);
+    motor2.servoWrite(0);
+  }, 10000);
+}
+
+function sendstatus() {
+  pubnub.publish(
+    {
+      message: {
+        status
+      },
+      channel: "lock_status"
+    }
+  )
 }
 
 //** start with the assumption that some or all doors are open */
 motor.servoWrite(2500);
 motor2.servoWrite(2500);
+servosOff();
+console.log("default servo position");
 
-
-setInterval(() => {
-  let sendupdate = false;
-
-  for(l=0;l<4;l++) {
-    if (!limit[l].digitalRead()) { //** currently closed? */
-      if (status[l].opened) { //** but it was open before.. */
-        setLocker(l, true); //** then lock it */
-        status[l].opened = false; //** and flag it closed */
-        sendupdate = true;
-      }
-    } else { //** currently open */
-      if (!status[l].opened) { //** but it was closed before.. */
-        status[l].opened = true; //** then flag it opened */
-        sendupdate = true;
-      }
+function handleLimit(state, l) {
+  if (!state) { //** currently closed? */
+    if (status[l].opened) { //** but it was open before.. */
+      setLocker(l+1, true); //** then lock it */
+      status[l].opened = false; //** and flag it closed */
+      sendupdate = true;
+    }
+  } else { //** currently open */
+    if (!status[l].opened) { //** but it was closed before.. */
+      status[l].opened = true; //** then flag it opened */
+      sendupdate = true;
     }
   }
+}
+
+limit.forEach((l,index) => {
+  l.glitchFilter(10000);//** set a debounce time for each switch */
+  l.on(
+    'alert', (level,tick) => {
+      handleLimit(level, index);
+    }
+  )
+});
+
+let sendupdate = false;
+
+setInterval(() => {
 
   if (sendupdate) {
     sendupdate = false;
 
-    pubnub.publish(
-      {
-        message: {
-          status
-        },
-        channel: "lock_status"
-      }
-    )
+    sendstatus();
   }
-}, 100);
+}, 1000);
